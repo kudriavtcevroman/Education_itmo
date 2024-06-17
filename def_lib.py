@@ -2,6 +2,23 @@
 Этот модуль содержит функции для игры "Кубик-Рубик".
 Полный список функций, которые содержатся в данном модуле:
 
+gamers_dict_check()
+gamers_dict_create()
+gamer_name_exists(name: str)
+gamer_name_create(name: str)
+total_games_increase(name: str, game_value: int)
+total_wins_increase(name: str, game_value: int)
+status_edit(name: str)
+show_total_games(name: str)
+show_total_wins(name: str)
+show_status(name: str)
+show_stats()
+answer(answr)
+quantity_gamers(x: int)
+game_cube(gamers: list, rounds: int)
+select_winner(gamers: list, score: list)
+answer_menu(select)
+menu()
 '''
 
 import csv
@@ -155,7 +172,7 @@ def status_edit(name: str):
             writer.writerows(data)
             gd.truncate()
 
-def show_total_games(name):
+def show_total_games(name: str):
     '''
     Функция, которая показывает сколько игр сыграл определённый игрок.
 
@@ -170,7 +187,7 @@ def show_total_games(name):
             if row['gamer_name'] == name:
                 return row['total_games']
 
-def show_total_wins(name):
+def show_total_wins(name: str):
     '''
     Функция, которая показывает сколько игр выиграл определённый игрок.
 
@@ -185,7 +202,7 @@ def show_total_wins(name):
             if row['gamer_name'] == name:
                 return row['total_wins']
 
-def show_status(name):
+def show_status(name: str):
     '''
     Функция, которая показывает статус определённого игрока.
 
