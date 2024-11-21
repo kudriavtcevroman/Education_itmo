@@ -57,11 +57,21 @@ def postprocess(predictions, image):
     # Имена классов (обновите в соответствии с вашей моделью)
     class_names = ['bee', 'wasp']
 
+    # Получаем размеры изображения
+    width, height = image.size
+
     # Рисование bounding box-ов
     draw = ImageDraw.Draw(image)
 
     for pred in predictions:
         x1, y1, x2, y2, conf, class_id = pred[:6]
+
+        # Если координаты нормализованы, масштабируем их
+        x1 *= width
+        x2 *= width
+        y1 *= height
+        y2 *= height
+
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         class_id = int(class_id)
 
@@ -76,7 +86,6 @@ def postprocess(predictions, image):
         y1, y2 = min(y1, y2), max(y1, y2)
 
         # Ограничиваем координаты размером изображения
-        width, height = image.size
         x1 = max(0, min(x1, width - 1))
         x2 = max(0, min(x2, width - 1))
         y1 = max(0, min(y1, height - 1))
