@@ -13,7 +13,7 @@ svc = bentoml.Service("bee_wasp_classifier_service")
 @svc.on_startup
 def load_model(context: bentoml.Context):
     global session, input_name, output_name
-    session = ort.InferenceSession("/content/best.onnx")
+    session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
 
