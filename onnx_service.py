@@ -7,104 +7,98 @@ import base64
 import io
 import os
 
-@bentoml.service(name="bee_wasp_detector")
-class BeeWaspDetectorService:
-    def __init__(self):
-        model_path = "/content/yolov8n_SGD.onnx"
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Файл модели не найден по пути {model_path}")
-        
-        # Загрузка модели ONNX
-        self.session = ort.InferenceSession(model_path)
-        self.input_name = self.session.get_inputs()[0].name
-        self.output_name = self.session.get_outputs()[0].name
-        
-        # Список имен классов. Расширьте этот список, если модель распознаёт больше классов.
-        self.class_names = ['Bee', 'Wasp']
-    
-    @bentoml.api(input=BentoImage(), output=JSON())
-    def predict(self, input_image: PILImage.Image) -> dict:
-        # Предобработка изображения
-        image = input_image.convert("RGB")
-        image_resized = image.resize((640, 640))  # Размер, соответствующий модели YOLOv8
-        image_data = np.array(image_resized).astype('float32') / 255.0  # Нормализация
-        image_data = image_data.transpose(2, 0, 1)  # Изменение порядка осей: HWC -> CHW
-        image_data = np.expand_dims(image_data, axis=0)  # Добавление размерности батча
+# Определяем сервис
+svc = bentoml.Service("bee_wasp_detector")
 
-        # Выполнение инференса
-        outputs = self.session.run([self.output_name], {self.input_name: image_data})
-        detections = np.squeeze(outputs[0])  # Удаление лишних размерностей
+# Загрузка модели при инициализации модуля
+model_path = "/content/yolov8n_SGD.onnx"
+if not os.path.exists(model_path):
+    raise FileNotFoundError(f"Файл модели не найден по пути {model_path}")
 
-        # Постобработка результатов
-        result_image, detected_classes = self.postprocess(detections, image_resized)
+session = ort.InferenceSession(model_path)
+input_name = session.get_inputs()[0].name
+output_name = session.get_outputs()[0].name
+class_names = ['Bee', 'Wasp']  # Расширьте этот список, если модель распознаёт больше классов
 
-        # Конвертация изображения в base64 для передачи через JSON
-        buffered = io.BytesIO()
-        result_image.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+@svc.api(input=BentoImage(), output=JSON())
+def predict(input_image: PILImage.Image) -> dict:
+    # Предобработка изображения
+    image = input_image.convert("RGB")
+    image_resized = image.resize((256, 256))  # Убедитесь, что размер соответствует модели
+    image_data = np.array(image_resized).astype('float32') / 255.0  # Нормализация
+    image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
+    image_data = np.expand_dims(image_data, axis=0)  # Добавляем размерность батча
 
-        # Получение имен классов из class_ids
-        detected_class_names = [self.class_names[class_id] for class_id in detected_classes]
+    # Выполнение инференса
+    outputs = session.run([output_name], {input_name: image_data})  # Исправлено на image_data
 
-        return {"image_base64": img_str, "detected_classes": detected_class_names}
+    # Постобработка и рисование результатов
+    result_image, detected_classes = postprocess(outputs, image_resized)
 
-    def postprocess(self, detections, image):
-        """
-        Обработка выходных данных модели и рисование bounding boxes.
-        """
-        # Проверка формы выходных данных
-        if detections.ndim == 1:
-            detections = detections[np.newaxis, :]  # Добавление размерности, если N=1
+    # Конвертация изображения в base64
+    buffered = io.BytesIO()
+    result_image.save(buffered, format="JPEG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        print(f"Количество детекций: {len(detections)}")
+    return {"image_base64": img_str, "detected_classes": detected_classes}
 
-        # Порог уверенности
-        conf_threshold = 0.1  # Уменьшите порог для проверки
+def postprocess(outputs, image):
+    # Обработка выходных данных модели и рисование bounding boxes
+    detections = outputs[0]  # Извлекаем предсказания
+    detections = np.squeeze(detections)  # Убираем лишние оси
 
-        draw = ImageDraw.Draw(image)
+    # Транспонируем, если необходимо
+    if detections.shape[0] == 6:
+        detections = detections.T  # Преобразуем в форму (N, 6)
 
-        width, height = image.size
+    print(f"Количество детекций: {len(detections)}")
 
-        detected_classes = []  # Список обнаруженных классов
+    # Порог уверенности
+    conf_threshold = 0.1  # Уменьшите порог для проверки
 
-        for detection in detections:
-            x1, y1, x2, y2, conf, class_id = detection[:6]
+    draw = ImageDraw.Draw(image)
 
-            # Проверяем порог уверенности
-            if conf < conf_threshold:
-                continue
+    width, height = image.size
 
-            # Масштабируем координаты обратно к исходному размеру изображения
-            x1 *= width
-            x2 *= width
-            y1 *= height
-            y2 *= height
+    detected_classes = []  # Список обнаруженных классов
 
-            # Преобразуем координаты в целые числа
-            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+    for detection in detections:
+        x1, y1, x2, y2, conf, class_id = detection[:6]
 
-            # Убедимся, что x1 <= x2 и y1 <= y2
-            x1, x2 = min(x1, x2), max(x1, x2)
-            y1, y2 = min(y1, y2), max(y1, y2)
+        # Проверяем уверенность
+        if conf < conf_threshold:
+            continue
 
-            # Ограничиваем координаты размерами изображения
-            x1 = max(0, min(x1, width))
-            x2 = max(0, min(x2, width))
-            y1 = max(0, min(y1, height))
-            y2 = max(0, min(y2, height))
+        # Преобразуем координаты к исходному размеру изображения
+        x1 *= width
+        x2 *= width
+        y1 *= height
+        y2 *= height
 
-            # Проверяем валидность class_id
-            class_id = int(class_id)
-            if class_id < 0 or class_id >= len(self.class_names):
-                continue  # Пропускаем, если class_id некорректен
+        # Преобразуем координаты в целые числа
+        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
 
-            label = f"{self.class_names[class_id]}: {conf:.2f}"
-            print(f"Обнаружен объект: {label} с координатами ({x1}, {y1}), ({x2}, {y2})")
+        # Убедимся, что x1 <= x2 и y1 <= y2
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
 
-            detected_classes.append(class_id)
+        # Ограничиваем координаты размерами изображения
+        x1 = max(0, min(x1, width))
+        x2 = max(0, min(x2, width))
+        y1 = max(0, min(y1, height))
+        y2 = max(0, min(y2, height))
 
-            # Рисуем bounding box и метку на изображении
-            draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
-            draw.text((x1, y1 - 10), label, fill="red")
+        class_id = int(class_id)
+        if class_id < 0 or class_id >= len(class_names):
+            continue  # Пропускаем, если class_id некорректен
 
-        return image, detected_classes
+        label = f"{class_names[class_id]}: {conf:.2f}"
+        print(f"Обнаружен объект: {label} с координатами ({x1}, {y1}), ({x2}, {y2})")
+
+        detected_classes.append(class_id)
+
+        # Рисуем bounding box и метку на изображении
+        draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
+        draw.text((x1, y1 - 10), label, fill="red")
+
+    return image, detected_classes
