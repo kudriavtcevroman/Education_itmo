@@ -97,7 +97,7 @@ def postprocess(outputs, image):
 
         detected_classes.append(class_id)
 
-        # Рисуем bounding box и метку на изображении
+        # Рисуем bounding box и метку
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 10), label, fill="red")
 
