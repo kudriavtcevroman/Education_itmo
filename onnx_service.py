@@ -5,23 +5,21 @@ import numpy as np
 from PIL import Image
 from bentoml.io import JSON
 
-# Создаём класс Runnable для выполнения инференса
-class ONNXModelRunnable(bentoml.Runnable):
-    SUPPORTED_RESOURCES = ("cpu",)  # Указываем, что поддерживаем CPU
-    SUPPORTS_CPU_MULTI_THREADING = True  # Многоядерная обработка для CPU
-
+# Создаём BentoML сервис
+@bentoml.service()
+class ONNXModelService:
     def __init__(self):
-        # Загрузка ONNX модели
+        # Загружаем ONNX модель
         self.session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
 
-    @bentoml.Runnable.method(batchable=False)  # Этот метод вызывается для предсказания
+    @bentoml.api(input=JSON(), output=JSON())
     def predict(self, input_sample: dict) -> dict:
         """
-        Метод для выполнения инференса.
+        Выполнение инференса модели.
         Args:
-            input_sample (dict): Словарь с путём к изображению.
+            input_sample (dict): JSON с путём к изображению.
         Returns:
             dict: Результаты предсказания модели.
         """
@@ -32,28 +30,9 @@ class ONNXModelRunnable(bentoml.Runnable):
         image_array = np.transpose(image_array, (2, 0, 1))  # Преобразование в CHW
         image_array = np.expand_dims(image_array, axis=0) / 255.0  # Нормализация
 
-        # Инференс модели
+        # Выполнение инференса
         predictions = self.session.run([self.output_name], {self.input_name: image_array})
 
-        # Постобработка
-        result = predictions[0].tolist()  # Конвертируем результаты в список
+        # Постобработка результатов
+        result = predictions[0].tolist()
         return {"predictions": result}
-
-# Создаём Runner для выполнения предсказаний
-onnx_runner = bentoml.Runner(ONNXModelRunnable)
-
-# BentoML сервис
-svc = bentoml.Service("onnx_model_service", runners=[onnx_runner])
-
-# API для обработки запросов
-@svc.api(input=JSON(), output=JSON())
-def predict(input_sample: dict) -> dict:
-    """
-    API для предсказаний.
-    Args:
-        input_sample (dict): Словарь с путём к изображению.
-    Returns:
-        dict: Результаты предсказания.
-    """
-    return onnx_runner.predict.run(input_sample)
-
