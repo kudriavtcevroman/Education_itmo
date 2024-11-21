@@ -29,13 +29,18 @@ class Model:
         # Предобработка данных
         image_path = input_sample["image_path"]
         image = Image.open(image_path).convert("RGB")
+
+        # Изменение размера до 640x640
+        image = image.resize((640, 640))
+
+        # Преобразование изображения в массив
         image_array = np.asarray(image).astype(np.float32)
-        image_array = np.transpose(image_array, (2, 0, 1))  # Преобразование в CHW
+        image_array = np.transpose(image_array, (2, 0, 1))  # Преобразование в формат CHW
         image_array = np.expand_dims(image_array, axis=0) / 255.0  # Нормализация
 
         # Выполнение инференса
         predictions = self.session.run([self.output_name], {self.input_name: image_array})
 
         # Постобработка
-        result = predictions[0].tolist()  # Преобразование в список
+        result = predictions[0].tolist()
         return {"predictions": result}
