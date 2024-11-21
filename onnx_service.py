@@ -5,17 +5,17 @@ import numpy as np
 from PIL import Image
 from bentoml.io import JSON
 
-# Создаём BentoML сервис
+# Создаём BentoML сервис с использованием декоратора
 @bentoml.service()
 class ONNXModelService:
     def __init__(self):
-        # Загружаем ONNX модель
+        # Загрузка ONNX модели
         self.session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
 
     @bentoml.api(input=JSON(), output=JSON())
-    def predict(self, input_sample: dict) -> dict:
+    async def predict(self, input_sample: dict) -> dict:
         """
         Выполнение инференса модели.
         Args:
