@@ -1,9 +1,9 @@
 from __future__ import annotations
 import bentoml
-from bentoml.io import Image, JSON
+from bentoml.io import Image as BentoImage, JSON
 import onnxruntime as ort
 import numpy as np
-from PIL import Image as PILImage, ImageDraw
+from PIL import Image, ImageDraw
 import base64
 import io
 
@@ -15,14 +15,14 @@ session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
 
-@svc.api(input=Image(), output=JSON())
-def predict(input_image: PILImage.Image) -> dict:
-    # Предобработка изображения
+@svc.api(input=BentoImage(), output=JSON())
+def predict(input_image: Image.Image) -> dict:
+    # Предобработка данных
     image = input_image.convert("RGB")
-    image_resized = image.resize((640, 640))
+    image_resized = image.resize((246, 246))
     draw_image = image_resized.copy()
 
-    # Преобразование изображения в numpy array
+    # Преобразование изображения в массив
     image_array = np.asarray(image_resized).astype(np.float32)
     image_array = np.transpose(image_array, (2, 0, 1))  # Преобразование в формат CHW
     image_array = np.expand_dims(image_array, axis=0) / 255.0  # Нормализация
@@ -30,7 +30,7 @@ def predict(input_image: PILImage.Image) -> dict:
     # Выполнение инференса
     predictions = session.run([output_name], {input_name: image_array})
 
-    # Постобработка предсказаний и рисование bounding box-ов
+    # Постобработка и рисование bounding box-ов
     result_image = postprocess(predictions, draw_image)
 
     # Конвертация изображения в base64
