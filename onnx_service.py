@@ -19,7 +19,7 @@ output_name = session.get_outputs()[0].name
 def predict(input_image: Image.Image) -> dict:
     # Предобработка данных
     image = input_image.convert("RGB")
-    image_resized = image.resize((246, 246))
+    image_resized = image.resize((256, 256))
     draw_image = image_resized.copy()
 
     # Преобразование изображения в массив
