@@ -24,35 +24,36 @@ def predict(input_image: Image.Image) -> dict:
 
     # Преобразование изображения в массив
     image_array = np.asarray(image_resized).astype(np.float32)
-    image_array = np.transpose(image_array, (2, 0, 1))  # Преобразование в формат CHW
-    image_array = np.expand_dims(image_array, axis=0) / 255.0  # Нормализация
+    image_array = image_array[:, :, ::-1]  # Перестановка каналов RGB -> BGR
+    image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = np.expand_dims(image_array, axis=0) / 255.0
 
     # Выполнение инференса
     predictions = session.run([output_name], {input_name: image_array})
 
     # Постобработка и рисование bounding box-ов
-    result_image = postprocess(predictions, draw_image)
+    result_image, detected_classes = postprocess(predictions, draw_image)
 
     # Конвертация изображения в base64
     buffered = io.BytesIO()
     result_image.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    return {"image_base64": img_str}
+    return {"image_base64": img_str, "detected_classes": detected_classes}
 
 def postprocess(predictions, image):
     # Извлекаем предсказания
     predictions = predictions[0][0]  # Удаляем измерение батча
 
     if predictions.size == 0:
-        return image  # Нет предсказаний
+        return image, []  # Нет предсказаний
 
     # Порог уверенности
     conf_threshold = 0.25
     predictions = predictions[predictions[:, 4] >= conf_threshold]
 
     if predictions.size == 0:
-        return image  # Нет предсказаний выше порога
+        return image, []  # Нет предсказаний выше порога
 
     # Имена классов (обновите в соответствии с вашей моделью)
     class_names = ['bee', 'wasp']
@@ -62,6 +63,8 @@ def postprocess(predictions, image):
 
     # Рисование bounding box-ов
     draw = ImageDraw.Draw(image)
+
+    detected_classes = []
 
     for pred in predictions:
         x1, y1, x2, y2, conf, class_id = pred[:6]
@@ -78,8 +81,10 @@ def postprocess(predictions, image):
         # Проверяем, что class_id в пределах списка class_names
         if 0 <= class_id < len(class_names):
             label = f"{class_names[class_id]}: {conf:.2f}"
+            detected_classes.append(class_names[class_id])
         else:
             label = f"Unknown class {class_id}: {conf:.2f}"
+            detected_classes.append(f"Unknown class {class_id}")
 
         # Убедимся, что x1 <= x2 и y1 <= y2
         x1, x2 = min(x1, x2), max(x1, x2)
@@ -95,4 +100,4 @@ def postprocess(predictions, image):
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 10), label, fill="red")
 
-    return image
+    return image, detected_classes
