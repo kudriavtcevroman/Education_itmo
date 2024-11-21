@@ -43,6 +43,12 @@ def predict(input_image: Image.Image) -> dict:
     return {"image_base64": img_str, "detected_classes": detected_classes}
 
 def postprocess(predictions, image):
+    # Отладочный вывод
+    print(f"Тип predictions: {type(predictions)}")
+    print(f"Длина predictions: {len(predictions)}")
+    print(f"Форма predictions[0]: {predictions[0].shape}")
+    print(f"Содержимое predictions[0]:\n{predictions[0]}")
+    
     # Извлекаем предсказания
     predictions = predictions[0]  # Удаляем внешний список
 
