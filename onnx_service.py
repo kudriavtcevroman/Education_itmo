@@ -18,19 +18,29 @@ if not os.path.exists(model_path):
 session = ort.InferenceSession(model_path)
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
-class_names = ['Bee', 'Wasp']  # Расширьте этот список, если модель распознаёт больше классов
+class_names = ['Bee', 'Wasp']
 
 @svc.api(input=BentoImage(), output=JSON())
 def predict(input_image: PILImage.Image) -> dict:
     # Предобработка изображения
     image = input_image.convert("RGB")
-    image_resized = image.resize((256, 256))  # Убедитесь, что размер соответствует модели
+    image_resized = image.resize((256, 256))  #
     image_data = np.array(image_resized).astype('float32') / 255.0  # Нормализация
     image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
     image_data = np.expand_dims(image_data, axis=0)  # Добавляем размерность батча
 
+    # Отладочные выводы для проверки предобработки
+    print(f"Image resized shape: {image_resized.size}")
+    print(f"Image data shape: {image_data.shape}")
+    print(f"Image data stats: min={image_data.min()}, max={image_data.max()}, mean={image_data.mean()}")
+
     # Выполнение инференса
-    outputs = session.run([output_name], {input_name: image_data})  # Исправлено на image_data
+    outputs = session.run([output_name], {input_name: image_data}) 
+
+    # Отладочные выводы для проверки выходных данных модели
+    print(f"Outputs shape: {np.array(outputs).shape}")
+    print(f"First 5 detections: {outputs[0][:5]}")
+    print(f"Total detections: {len(outputs[0])}")
 
     # Постобработка и рисование результатов
     result_image, detected_classes = postprocess(outputs, image_resized)
@@ -40,7 +50,10 @@ def predict(input_image: PILImage.Image) -> dict:
     result_image.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    return {"image_base64": img_str, "detected_classes": detected_classes}
+    # Получение имен классов из class_ids
+    detected_class_names = [class_names[class_id] for class_id in detected_classes]
+
+    return {"image_base64": img_str, "detected_classes": detected_class_names}
 
 def postprocess(outputs, image):
     # Обработка выходных данных модели и рисование bounding boxes
@@ -52,6 +65,7 @@ def postprocess(outputs, image):
         detections = detections.T  # Преобразуем в форму (N, 6)
 
     print(f"Количество детекций: {len(detections)}")
+    print(f"Содержимое detections: {detections[:5]}")  # Печать первых 5 детекций для проверки
 
     # Порог уверенности
     conf_threshold = 0.1  # Уменьшите порог для проверки
@@ -65,14 +79,17 @@ def postprocess(outputs, image):
     for detection in detections:
         x1, y1, x2, y2, conf, class_id = detection[:6]
 
+        # Отладочный вывод
+        print(f"Raw detection: x1={x1}, y1={y1}, x2={x2}, y2={y2}, conf={conf}, class_id={class_id}")
+
         # Проверяем уверенность
         if conf < conf_threshold:
             continue
 
         # Преобразуем координаты к исходному размеру изображения
         x1 *= width
-        x2 *= width
         y1 *= height
+        x2 *= width
         y2 *= height
 
         # Преобразуем координаты в целые числа
@@ -88,7 +105,10 @@ def postprocess(outputs, image):
         y1 = max(0, min(y1, height))
         y2 = max(0, min(y2, height))
 
+        # Преобразуем class_id в целое число
         class_id = int(class_id)
+        print(f"Converted class_id: {class_id}")
+
         if class_id < 0 or class_id >= len(class_names):
             continue  # Пропускаем, если class_id некорректен
 
