@@ -18,16 +18,15 @@ if not os.path.exists(model_path):
 session = ort.InferenceSession(model_path)
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
-class_names = ['Bee', 'Wasp']  # Расширьте этот список, если модель распознаёт больше классов
-
+class_names = ['Bee', 'Wasp']
 @svc.api(input=BentoImage(), output=JSON())
 def predict(input_image: PILImage.Image) -> dict:
     # Предобработка изображения
     image = input_image.convert("RGB")
-    image_resized = image.resize((256, 256))  # Используем разрешение 256x256
-    image_data = np.array(image_resized).astype('float32') / 255.0  # Нормализация
-    image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
-    image_data = np.expand_dims(image_data, axis=0)  # Добавляем размерность батча
+    image_resized = image.resize((256, 256))
+    image_data = np.array(image_resized).astype('float32') / 255.0
+    image_data = image_data.transpose(2, 0, 1)
+    image_data = np.expand_dims(image_data, axis=0)
 
     # Отладочные выводы для проверки предобработки
     print(f"Image resized shape: {image_resized.size}")
@@ -35,7 +34,7 @@ def predict(input_image: PILImage.Image) -> dict:
     print(f"Image data stats: min={image_data.min()}, max={image_data.max()}, mean={image_data.mean()}")
 
     # Выполнение инференса
-    outputs = session.run([output_name], {input_name: image_data})  # Исправлено на image_data
+    outputs = session.run([output_name], {input_name: image_data})
 
     # Отладочные выводы для проверки выходных данных модели
     print(f"Outputs shape: {np.array(outputs).shape}")
@@ -57,24 +56,24 @@ def predict(input_image: PILImage.Image) -> dict:
 
 def postprocess(outputs, image):
     # Обработка выходных данных модели и рисование bounding boxes
-    detections = outputs[0]  # Извлекаем предсказания
-    detections = np.squeeze(detections)  # Убираем лишние оси
+    detections = outputs[0]
+    detections = np.squeeze(detections)
 
     # Транспонируем, если необходимо
     if detections.shape[0] == 6:
         detections = detections.T  # Преобразуем в форму (N, 6)
 
     print(f"Количество детекций: {len(detections)}")
-    print(f"Содержимое detections: {detections[:5]}")  # Печать первых 5 детекций для проверки
+    print(f"Содержимое detections: {detections[:5]}")
 
     # Порог уверенности
-    conf_threshold = 0.1  # Уменьшите порог для проверки
+    conf_threshold = 0.1
 
     draw = ImageDraw.Draw(image)
 
     width, height = image.size
 
-    detected_classes = []  # Список обнаруженных классов
+    detected_classes = []
 
     for detection in detections:
         x1, y1, x2, y2, conf, class_prob = detection[:6]
