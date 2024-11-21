@@ -18,13 +18,13 @@ if not os.path.exists(model_path):
 session = ort.InferenceSession(model_path)
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
-class_names = ['Bee', 'Wasp']
+class_names = ['Bee', 'Wasp']  # Расширьте этот список, если модель распознаёт больше классов
 
 @svc.api(input=BentoImage(), output=JSON())
 def predict(input_image: PILImage.Image) -> dict:
     # Предобработка изображения
     image = input_image.convert("RGB")
-    image_resized = image.resize((256, 256))  #
+    image_resized = image.resize((256, 256))  # Используем разрешение 256x256
     image_data = np.array(image_resized).astype('float32') / 255.0  # Нормализация
     image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
     image_data = np.expand_dims(image_data, axis=0)  # Добавляем размерность батча
@@ -35,7 +35,7 @@ def predict(input_image: PILImage.Image) -> dict:
     print(f"Image data stats: min={image_data.min()}, max={image_data.max()}, mean={image_data.mean()}")
 
     # Выполнение инференса
-    outputs = session.run([output_name], {input_name: image_data}) 
+    outputs = session.run([output_name], {input_name: image_data})  # Исправлено на image_data
 
     # Отладочные выводы для проверки выходных данных модели
     print(f"Outputs shape: {np.array(outputs).shape}")
@@ -77,20 +77,26 @@ def postprocess(outputs, image):
     detected_classes = []  # Список обнаруженных классов
 
     for detection in detections:
-        x1, y1, x2, y2, conf, class_id = detection[:6]
+        x1, y1, x2, y2, conf, class_prob = detection[:6]
 
         # Отладочный вывод
-        print(f"Raw detection: x1={x1}, y1={y1}, x2={x2}, y2={y2}, conf={conf}, class_id={class_id}")
+        print(f"Raw detection: x1={x1}, y1={y1}, x2={x2}, y2={y2}, conf={conf}, class_prob={class_prob}")
 
         # Проверяем уверенность
         if conf < conf_threshold:
             continue
 
-        # Преобразуем координаты к исходному размеру изображения
-        x1 *= width
-        y1 *= height
-        x2 *= width
-        y2 *= height
+        # Определяем класс на основе вероятности
+        class_id = 1 if class_prob > 0.5 else 0  # Применяем порог 0.5
+
+        if class_id < 0 or class_id >= len(class_names):
+            continue  # Пропускаем, если class_id некорректен
+
+        # Масштабируем координаты к размеру изображения
+        x1 = x1 * width
+        y1 = y1 * height
+        x2 = x2 * width
+        y2 = y2 * height
 
         # Преобразуем координаты в целые числа
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
@@ -104,13 +110,6 @@ def postprocess(outputs, image):
         x2 = max(0, min(x2, width))
         y1 = max(0, min(y1, height))
         y2 = max(0, min(y2, height))
-
-        # Преобразуем class_id в целое число
-        class_id = int(class_id)
-        print(f"Converted class_id: {class_id}")
-
-        if class_id < 0 or class_id >= len(class_names):
-            continue  # Пропускаем, если class_id некорректен
 
         label = f"{class_names[class_id]}: {conf:.2f}"
         print(f"Обнаружен объект: {label} с координатами ({x1}, {y1}), ({x2}, {y2})")
