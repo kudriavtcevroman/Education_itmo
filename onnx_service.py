@@ -5,8 +5,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 import base64
 import io
-
-EXAMPLE_INPUT = {"image_path": "/content/Datasets/Bee_or_Wasp_Subset/validation/bees/117423537_2f4372aa4e_m.jpg"}
+from bentoml.io import Image as BentoImage, JSON
 
 @bentoml.service(
     resources={"cpu": "2"},
@@ -19,20 +18,17 @@ class Model:
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
 
-    @bentoml.api
-    def predict(self, input_sample: dict = EXAMPLE_INPUT) -> dict:
+    @bentoml.api(input=BentoImage(), output=JSON())
+    def predict(self, input_image) -> dict:
         """
         Выполнение инференса модели и возврат изображения с детекцией.
         Args:
-            input_sample (dict): JSON с путём к изображению.
+            input_image: Входное изображение.
         Returns:
             dict: Изображение с детекцией, закодированное в base64.
         """
         # Предобработка данных
-        image_path = input_sample["image_path"]
-        image = Image.open(image_path).convert("RGB")
-
-        # Изменение размера до 640x640
+        image = input_image.convert("RGB")
         image_resized = image.resize((640, 640))
 
         # Сохраняем копию изображения для рисования bounding box-ов
@@ -57,18 +53,8 @@ class Model:
         return {"image_base64": img_str}
 
     def postprocess(self, predictions, image):
-        """
-        Постобработка выходных данных модели и рисование bounding box-ов.
-        Args:
-            predictions (list): Сырые выходные данные модели.
-            image (PIL Image): Изображение для рисования bounding box-ов.
-        Returns:
-            PIL Image: Изображение с нарисованными bounding box-ами.
-        """
         # Получаем предсказания
-        predictions = predictions[0]  # Предполагаем батч размером 1
-        # Преобразуем в numpy array
-        predictions = np.array(predictions)
+        predictions = predictions[0][0]  # Предполагаем батч размером 1
 
         if predictions.size == 0:
             return image  # Нет предсказаний
