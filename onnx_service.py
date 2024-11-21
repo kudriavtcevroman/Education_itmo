@@ -42,61 +42,63 @@ def predict(input_image: Image.Image) -> dict:
     return {"image_base64": img_str, "detected_classes": detected_classes}
 
 def postprocess(predictions, image):
-    # Извлекаем предсказания
-    predictions = predictions[0][0]  # Удаляем измерение батча
+    # Предположим, что predictions[0] имеет форму [num_predictions, 85]
+    # Где первые 4 элемента - координаты бокса, 5-й - уверенность, остальные 80 - вероятности классов
+    predictions = predictions[0]  # Извлекаем предсказания
 
     if predictions.size == 0:
-        return image  # Нет предсказаний
+        return image, []  # Нет предсказаний
 
-    # Порог уверенности
+    # Порог уверенности для бокса
     conf_threshold = 0.25
-    predictions = predictions[predictions[:, 4] >= conf_threshold]
+    # Порог для вероятности класса
+    class_conf_threshold = 0.25
 
-    if predictions.size == 0:
-        return image  # Нет предсказаний выше порога
-
-    # Имена классов
-    class_names = ['Bee', 'Wasp']
-
-    # Получаем размеры изображения
-    width, height = image.size
-
-    # Рисование bounding box-ов
-    draw = ImageDraw.Draw(image)
+    boxes = []
+    detected_classes = []
 
     for pred in predictions:
-        x1, y1, x2, y2, conf, class_id = pred[:6]
+        # Извлекаем уверенность объекта
+        obj_conf = pred[4]
 
-        # Выводим дополнительную информацию о классе
-        print(f"Предсказанный класс: {class_id}, уверенность: {conf}")
+        if obj_conf < conf_threshold:
+            continue  # Пропускаем, если уверенность ниже порога
 
-        # Если координаты нормализованы, масштабируем их
+        # Извлекаем вероятности классов
+        class_probs = pred[5:]
+        class_id = np.argmax(class_probs)
+        class_conf = class_probs[class_id]
+
+        if class_conf < class_conf_threshold:
+            continue  # Пропускаем, если уверенность в классе ниже порога
+
+        # Общая уверенность - произведение уверенности объекта и класса
+        conf = obj_conf * class_conf
+
+        # Извлекаем координаты бокса
+        x1, y1, x2, y2 = pred[:4]
+
+        # Масштабируем координаты
+        width, height = image.size
         x1 *= width
         x2 *= width
         y1 *= height
         y2 *= height
 
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-        class_id = int(class_id)
 
-        # Проверяем, что class_id в пределах списка class_names
-        if 0 <= class_id < len(class_names):
-            label = f"{class_names[class_id]}: {conf:.2f}"
-        else:
-            label = f"Unknown class {class_id}: {conf:.2f}"
+        # Добавляем данные в списки
+        boxes.append([x1, y1, x2, y2, conf, class_id])
+        detected_classes.append(class_id)
 
-        # Убедимся, что x1 <= x2 и y1 <= y2
-        x1, x2 = min(x1, x2), max(x1, x2)
-        y1, y2 = min(y1, y2), max(y1, y2)
+    # Рисуем боксы и метки
+    draw = ImageDraw.Draw(image)
+    class_names = ['Bee', 'Wasp']  # Ваши классы
 
-        # Ограничиваем координаты размером изображения
-        x1 = max(0, min(x1, width - 1))
-        x2 = max(0, min(x2, width - 1))
-        y1 = max(0, min(y1, height - 1))
-        y2 = max(0, min(y2, height - 1))
-
-        # Рисуем прямоугольник и метку
+    for box in boxes:
+        x1, y1, x2, y2, conf, class_id = box
+        label = f"{class_names[class_id]}: {conf:.2f}"
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 10), label, fill="red")
 
-    return image
+    return image, detected_classes
