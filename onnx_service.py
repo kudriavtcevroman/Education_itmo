@@ -1,110 +1,79 @@
 import bentoml
-from bentoml.io import Image as BentoImage, JSON
-import onnxruntime as ort
+from bentoml.io import Image
 import numpy as np
-from PIL import Image, ImageDraw
+import onnxruntime as ort
+from PIL import Image as PILImage, ImageDraw
 import base64
 import io
 
-# Определяем сервис
-svc = bentoml.Service("bee_wasp_classifier_service")
+@bentoml.service(name="bee_wasp_detector")
+class BeeWaspDetectorService:
+    def __init__(self):
+        # Загрузка модели YOLOv8 ONNX
+        self.session = ort.InferenceSession('/content/yolov8n_SGD.onnx')
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+        # Имена классов
+        self.class_names = ['Bee', 'Wasp']
 
-# Загружаем модель при инициализации сервиса
-@svc.on_startup
-def load_model(context: bentoml.Context):
-    global session, input_name, output_name
-    session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
-    input_name = session.get_inputs()[0].name
-    output_name = session.get_outputs()[0].name
+    @bentoml.api(input=Image(), output=Image())
+    def predict(self, input_image: PILImage.Image) -> PILImage.Image:
+        # Предобработка изображения
+        image = input_image.convert("RGB")
+        image_resized = image.resize((256, 256))
+        image_data = np.array(image_resized).astype('float32') / 255.0
+        image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
+        image_data = np.expand_dims(image_data, axis=0)
 
-@svc.api(input=BentoImage(), output=JSON())
-def predict(input_image: Image.Image) -> dict:
-    # Предобработка данных
-    image = input_image.convert("RGB")
-    image_resized = image.resize((256, 256))
-    draw_image = image_resized.copy()
+        # Выполнение инференса
+        outputs = self.session.run([self.output_name], {self.input_name: image_data})
 
-    # Преобразование изображения в массив
-    image_array = np.asarray(image_resized).astype(np.float32) / 255.0
-    image_array = np.transpose(image_array, (2, 0, 1))
-    image_array = np.expand_dims(image_array, axis=0)
+        # Постобработка и рисование результатов
+        result_image = self.postprocess(outputs, image_resized)
 
-    # Выполнение инференса
-    predictions = session.run([output_name], {input_name: image_array})
+        return result_image
 
-    # Постобработка и рисование bounding box-ов
-    result_image, detected_classes = postprocess(predictions, draw_image)
+    def postprocess(self, outputs, image):
+        # Обработка выходных данных модели и рисование bounding boxes
+        detections = outputs[0]  # Извлекаем предсказания
+        detections = np.squeeze(detections)  # Убираем лишние оси
 
-    # Конвертация изображения в base64
-    buffered = io.BytesIO()
-    result_image.save(buffered, format="JPEG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        # Транспонируем, если необходимо
+        if detections.shape[0] == 6:
+            detections = detections.T  # Преобразуем в форму (N, 6)
 
-    return {"image_base64": img_str, "detected_classes": detected_classes}
+        # Порог уверенности
+        conf_threshold = 0.25
 
-def postprocess(predictions, image):
-    # Отладочный вывод
-    print(f"Тип predictions: {type(predictions)}")
-    print(f"Длина predictions: {len(predictions)}")
-    print(f"Форма predictions[0]: {predictions[0].shape}")
-    print(f"Содержимое predictions[0]:\n{predictions[0]}")
-    
-    # Извлекаем предсказания
-    predictions = predictions[0]  # Удаляем внешний список
+        draw = ImageDraw.Draw(image)
 
-    # Если предсказаний нет, возвращаем исходное изображение и пустой список
-    if predictions.size == 0:
-        return image, []
+        for detection in detections:
+            x1, y1, x2, y2, conf, class_id = detection[:6]
 
-    # Преобразуем предсказания в нужную форму
-    predictions = np.squeeze(predictions)
+            # Проверяем уверенность
+            if conf < conf_threshold:
+                continue
 
-    # Порог уверенности
-    conf_threshold = 0.25
+            # Преобразуем координаты к исходному размеру изображения
+            width, height = image.size
+            x1 *= width
+            x2 *= width
+            y1 *= height
+            y2 *= height
 
-    # Имена классов
-    class_names = ['Bee', 'Wasp']
+            x1 = int(max(0, x1))
+            y1 = int(max(0, y1))
+            x2 = int(min(width, x2))
+            y2 = int(min(height, y2))
 
-    # Получаем размеры изображения
-    width, height = image.size
+            class_id = int(class_id)
+            if class_id < 0 or class_id >= len(self.class_names):
+                continue  # Пропускаем, если class_id некорректен
 
-    # Списки для обнаруженных объектов
-    boxes = []
-    detected_classes = []
+            label = f"{self.class_names[class_id]}: {conf:.2f}"
 
-    # Пробегаем по каждому предсказанию
-    for pred in predictions:
-        # Извлекаем координаты и другие параметры
-        x1, y1, x2, y2, obj_conf, class_conf = pred[:6]
-        class_scores = pred[5:]  # Вероятности классов
+            # Рисуем bounding box и метку
+            draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
+            draw.text((x1, y1 - 10), label, fill="red")
 
-        # Вычисляем общую уверенность
-        conf = obj_conf * class_conf
-
-        if conf < conf_threshold:
-            continue  # Пропускаем предсказания с низкой уверенностью
-
-        # Определяем идентификатор класса
-        class_id = int(np.argmax(class_scores))
-
-        # Масштабируем координаты до размеров изображения
-        x1 *= width
-        x2 *= width
-        y1 *= height
-        y2 *= height
-
-        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-
-        # Добавляем информацию об объекте
-        boxes.append([x1, y1, x2, y2, conf, class_id])
-        detected_classes.append(class_names[class_id])
-
-    # Рисуем bounding box-ы и метки
-    draw = ImageDraw.Draw(image)
-    for box in boxes:
-        x1, y1, x2, y2, conf, class_id = box
-        label = f"{class_names[class_id]}: {conf:.2f}"
-        draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
-        draw.text((x1, y1 - 10), label, fill="red")
-
-    return image, detected_classes
+        return image
