@@ -46,17 +46,17 @@ def postprocess(predictions, image):
     predictions = predictions[0][0]  # Удаляем измерение батча
 
     if predictions.size == 0:
-        return image, []  # Нет предсказаний
+        return image  # Нет предсказаний
 
     # Порог уверенности
     conf_threshold = 0.25
     predictions = predictions[predictions[:, 4] >= conf_threshold]
 
     if predictions.size == 0:
-        return image, []  # Нет предсказаний выше порога
+        return image  # Нет предсказаний выше порога
 
-    # Имена классов (обновите в соответствии с вашей моделью)
-    class_names = ['bee', 'wasp']
+    # Имена классов
+    class_names = ['Bee', 'Wasp']
 
     # Получаем размеры изображения
     width, height = image.size
@@ -64,10 +64,11 @@ def postprocess(predictions, image):
     # Рисование bounding box-ов
     draw = ImageDraw.Draw(image)
 
-    detected_classes = []
-
     for pred in predictions:
         x1, y1, x2, y2, conf, class_id = pred[:6]
+
+        # Выводим дополнительную информацию о классе
+        print(f"Предсказанный класс: {class_id}, уверенность: {conf}")
 
         # Если координаты нормализованы, масштабируем их
         x1 *= width
@@ -81,10 +82,8 @@ def postprocess(predictions, image):
         # Проверяем, что class_id в пределах списка class_names
         if 0 <= class_id < len(class_names):
             label = f"{class_names[class_id]}: {conf:.2f}"
-            detected_classes.append(class_names[class_id])
         else:
             label = f"Unknown class {class_id}: {conf:.2f}"
-            detected_classes.append(f"Unknown class {class_id}")
 
         # Убедимся, что x1 <= x2 и y1 <= y2
         x1, x2 = min(x1, x2), max(x1, x2)
@@ -100,4 +99,4 @@ def postprocess(predictions, image):
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 10), label, fill="red")
 
-    return image, detected_classes
+    return image
