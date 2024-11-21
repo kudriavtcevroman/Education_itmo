@@ -5,35 +5,36 @@ import onnxruntime as ort
 from PIL import Image as PILImage, ImageDraw
 import os
 
-@bentoml.service(name="bee_wasp_detector")
-class BeeWaspDetectorService:
-    def __init__(self):
-        model_path = "/content/yolov8n_SGD.onnx"
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Файл модели не найден по пути {model_path}")
-        self.session = ort.InferenceSession(model_path)
-        self.input_name = self.session.get_inputs()[0].name
-        self.output_name = self.session.get_outputs()[0].name
-        # Имена классов
-        self.class_names = ['Bee', 'Wasp']
+# Определяем сервис
+svc = bentoml.Service("bee_wasp_detector")
 
-    @bentoml.api(input=BentoImage(), output=BentoImage())
-    def predict(self, input_image: PILImage.Image) -> PILImage.Image:
-        # Предобработка изображения
-        image = input_image.convert("RGB")
-        image_resized = image.resize((256, 256))
-        image_data = np.array(image_resized).astype('float32') / 255.0
-        image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
-        image_data = np.expand_dims(image_data, axis=0)
+# Загрузка модели при инициализации модуля
+model_path = "/content/yolov8n_SGD.onnx"
+if not os.path.exists(model_path):
+    raise FileNotFoundError(f"Файл модели не найден по пути {model_path}")
 
-        # Выполнение инференса
-        outputs = self.session.run([self.output_name], {self.input_name: image_data})
+session = ort.InferenceSession(model_path)
+input_name = session.get_inputs()[0].name
+output_name = session.get_outputs()[0].name
+class_names = ['Bee', 'Wasp']
 
-        # Постобработка и рисование результатов
-        result_image = self.postprocess(outputs, image_resized)
+@svc.api(input=BentoImage(), output=BentoImage())
+def predict(input_image: PILImage.Image) -> PILImage.Image:
+    # Предобработка изображения
+    image = input_image.convert("RGB")
+    image_resized = image.resize((256, 256))
+    image_data = np.array(image_resized).astype('float32') / 255.0
+    image_data = image_data.transpose(2, 0, 1)  # HWC to CHW
+    image_data = np.expand_dims(image_data, axis=0)
 
-        return result_image
-        
+    # Выполнение инференса
+    outputs = session.run([output_name], {input_name: image_data})
+
+    # Постобработка и рисование результатов
+    result_image = postprocess(outputs, image_resized)
+
+    return result_image
+
 def postprocess(outputs, image):
     # Обработка выходных данных модели и рисование bounding boxes
     detections = outputs[0]  # Извлекаем предсказания
