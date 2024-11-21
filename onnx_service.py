@@ -5,29 +5,20 @@ import numpy as np
 from PIL import Image
 from bentoml.io import JSON
 
-EXAMPLE_INPUT = {"image_path": "/content/Datasets/Bee_or_Wasp_Subset/validation/bees/117423537_2f4372aa4e_m.jpg"}
+# BentoML Runnable для выполнения инференса
+class ONNXModelRunnable(bentoml.Runnable):
+    SUPPORTED_RESOURCES = ("cpu",)  # Можно добавить "gpu", если используется
+    SUPPORTS_CPU_MULTI_THREADING = True
 
-@bentoml.service(
-    resources={"cpu": "2"},
-    traffic={"timeout": 10},
-)
-class ONNXModelService:
-    def __init__(self) -> None:
+    def __init__(self):
         # Загрузка ONNX модели
         self.session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
 
-    @bentoml.api(input=JSON(), output=JSON())
-    def predict(self, input_sample: dict = EXAMPLE_INPUT) -> dict:
-        """
-        Инференс модели.
-        Args:
-            input_sample (dict): JSON с путем к изображению.
-        Returns:
-            dict: Результаты предсказания модели.
-        """
-        # Предобработка изображения
+    @bentoml.Runnable.method(batchable=False)
+    def predict(self, input_sample: dict) -> dict:
+        # Предобработка входных данных
         image_path = input_sample["image_path"]
         image = Image.open(image_path).convert("RGB")
         image_array = np.asarray(image).astype(np.float32)
@@ -37,6 +28,19 @@ class ONNXModelService:
         # Выполнение инференса
         predictions = self.session.run([self.output_name], {self.input_name: image_array})
 
-        # Постобработка
-        result = predictions[0].tolist()  # Настройте для вашей задачи
+        # Постобработка результатов
+        result = predictions[0].tolist()
         return {"predictions": result}
+
+
+# Создаём Runner для выполнения инференса
+onnx_runner = bentoml.Runner(ONNXModelRunnable)
+
+# BentoML Service для обёртки API
+svc = bentoml.Service("onnx_model_service", runners=[onnx_runner])
+
+# API для предсказаний
+@svc.api(input=JSON(), output=JSON())
+def predict(input_sample: dict) -> dict:
+    return onnx_runner.predict.run(input_sample)
+
