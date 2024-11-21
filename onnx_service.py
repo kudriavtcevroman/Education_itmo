@@ -44,12 +44,16 @@ def postprocess(outputs, image):
     if detections.shape[0] == 6:
         detections = detections.T  # Преобразуем в форму (N, 6)
 
+    print(f"Количество детекций: {len(detections)}")
+
     # Порог уверенности
-    conf_threshold = 0.25
+    conf_threshold = 0.1  # Уменьшите порог для проверки
 
     draw = ImageDraw.Draw(image)
 
     width, height = image.size
+
+    detected_classes = []  # Список обнаруженных классов
 
     for detection in detections:
         x1, y1, x2, y2, conf, class_id = detection[:6]
@@ -82,9 +86,12 @@ def postprocess(outputs, image):
             continue  # Пропускаем, если class_id некорректен
 
         label = f"{class_names[class_id]}: {conf:.2f}"
+        print(f"Обнаружен объект: {label} с координатами ({x1}, {y1}), ({x2}, {y2})")
+
+        detected_classes.append(class_id)
 
         # Рисуем bounding box и метку
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 10), label, fill="red")
 
-    return image
+    return image, detected_classes
