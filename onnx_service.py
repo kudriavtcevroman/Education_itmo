@@ -1,4 +1,3 @@
-from __future__ import annotations
 import bentoml
 from bentoml.io import Image as BentoImage, JSON
 import onnxruntime as ort
@@ -11,9 +10,12 @@ import io
 svc = bentoml.Service("bee_wasp_classifier_service")
 
 # Загружаем модель при инициализации сервиса
-session = ort.InferenceSession("/content/yolov8n_SGD.onnx")
-input_name = session.get_inputs()[0].name
-output_name = session.get_outputs()[0].name
+@svc.on_startup
+def load_model(context: bentoml.Context):
+    global session, input_name, output_name
+    session = ort.InferenceSession("/content/best.onnx")
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
 
 @svc.api(input=BentoImage(), output=JSON())
 def predict(input_image: Image.Image) -> dict:
@@ -23,10 +25,9 @@ def predict(input_image: Image.Image) -> dict:
     draw_image = image_resized.copy()
 
     # Преобразование изображения в массив
-    image_array = np.asarray(image_resized).astype(np.float32)
-    image_array = image_array[:, :, ::-1]  # Перестановка каналов RGB -> BGR
+    image_array = np.asarray(image_resized).astype(np.float32) / 255.0
     image_array = np.transpose(image_array, (2, 0, 1))
-    image_array = np.expand_dims(image_array, axis=0) / 255.0
+    image_array = np.expand_dims(image_array, axis=0)
 
     # Выполнение инференса
     predictions = session.run([output_name], {input_name: image_array})
@@ -42,44 +43,45 @@ def predict(input_image: Image.Image) -> dict:
     return {"image_base64": img_str, "detected_classes": detected_classes}
 
 def postprocess(predictions, image):
-    # Предположим, что predictions[0] имеет форму [num_predictions, 85]
-    # Где первые 4 элемента - координаты бокса, 5-й - уверенность, остальные 80 - вероятности классов
-    predictions = predictions[0]  # Извлекаем предсказания
+    # Извлекаем предсказания
+    predictions = predictions[0]  # Удаляем внешний список
 
+    # Если предсказаний нет, возвращаем исходное изображение и пустой список
     if predictions.size == 0:
-        return image, []  # Нет предсказаний
+        return image, []
 
-    # Порог уверенности для бокса
+    # Преобразуем предсказания в нужную форму
+    predictions = np.squeeze(predictions)
+
+    # Порог уверенности
     conf_threshold = 0.25
-    # Порог для вероятности класса
-    class_conf_threshold = 0.25
 
+    # Имена классов
+    class_names = ['Bee', 'Wasp']
+
+    # Получаем размеры изображения
+    width, height = image.size
+
+    # Списки для обнаруженных объектов
     boxes = []
     detected_classes = []
 
+    # Пробегаем по каждому предсказанию
     for pred in predictions:
-        # Извлекаем уверенность объекта
-        obj_conf = pred[4]
+        # Извлекаем координаты и другие параметры
+        x1, y1, x2, y2, obj_conf, class_conf = pred[:6]
+        class_scores = pred[5:]  # Вероятности классов
 
-        if obj_conf < conf_threshold:
-            continue  # Пропускаем, если уверенность ниже порога
-
-        # Извлекаем вероятности классов
-        class_probs = pred[5:]
-        class_id = np.argmax(class_probs)
-        class_conf = class_probs[class_id]
-
-        if class_conf < class_conf_threshold:
-            continue  # Пропускаем, если уверенность в классе ниже порога
-
-        # Общая уверенность - произведение уверенности объекта и класса
+        # Вычисляем общую уверенность
         conf = obj_conf * class_conf
 
-        # Извлекаем координаты бокса
-        x1, y1, x2, y2 = pred[:4]
+        if conf < conf_threshold:
+            continue  # Пропускаем предсказания с низкой уверенностью
 
-        # Масштабируем координаты
-        width, height = image.size
+        # Определяем идентификатор класса
+        class_id = int(np.argmax(class_scores))
+
+        # Масштабируем координаты до размеров изображения
         x1 *= width
         x2 *= width
         y1 *= height
@@ -87,14 +89,12 @@ def postprocess(predictions, image):
 
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
 
-        # Добавляем данные в списки
+        # Добавляем информацию об объекте
         boxes.append([x1, y1, x2, y2, conf, class_id])
-        detected_classes.append(class_id)
+        detected_classes.append(class_names[class_id])
 
-    # Рисуем боксы и метки
+    # Рисуем bounding box-ы и метки
     draw = ImageDraw.Draw(image)
-    class_names = ['Bee', 'Wasp']  # Ваши классы
-
     for box in boxes:
         x1, y1, x2, y2, conf, class_id = box
         label = f"{class_names[class_id]}: {conf:.2f}"
