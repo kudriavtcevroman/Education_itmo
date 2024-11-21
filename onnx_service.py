@@ -71,6 +71,17 @@ def postprocess(predictions, image):
         else:
             label = f"Unknown class {class_id}: {conf:.2f}"
 
+        # Убедимся, что x1 <= x2 и y1 <= y2
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+
+        # Ограничиваем координаты размером изображения
+        width, height = image.size
+        x1 = max(0, min(x1, width - 1))
+        x2 = max(0, min(x2, width - 1))
+        y1 = max(0, min(y1, height - 1))
+        y2 = max(0, min(y2, height - 1))
+
         # Рисуем прямоугольник и метку
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 10), label, fill="red")
